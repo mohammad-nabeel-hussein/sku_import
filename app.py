@@ -91,7 +91,7 @@ m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-# --- ZenRows Anti-Bot Scraper Engine ---
+# --- ZenRows Anti-Bot Scraper Engine (Fixed 401 Authorization) ---
 def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     sku_to_page = {}
     total_pages = (end_p - start_p) + 1
@@ -101,7 +101,7 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     session = requests.Session()
 
     for current_page in range(start_p, end_p + 1):
-        status_placeholder.info(f"Fetching Page {current_page} of {end_p} via ZenRows Anti-Bot Bypass...")
+        status_placeholder.info(f"Fetching Page {current_page} of {end_p} via ZenRows...")
 
         formatted_query = query.strip().replace(" ", "+")
         
@@ -110,13 +110,11 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         else:
             target_noon_url = f"https://www.noon.com/{country_path}/search/?page={current_page}&q={formatted_query}"
         
-        # ZenRows Anti-Bot Configuration
+        # Standard JS render parameter (Compatible with Free Tier)
         params = {
             "api_key": ZENROWS_API_KEY,
             "url": target_noon_url,
-            "js_render": "true",
-            "premium_proxy": "true",
-            "proxy_country": "sa"
+            "js_render": "true"
         }
 
         try:
@@ -125,7 +123,7 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
             if res.status_code == 200:
                 html_text = res.text
                 
-                # Extract Noon product SKUs
+                # Extract Noon product SKUs matching catalog pattern
                 found_skus = set(re.findall(r"/([A-Z0-9]{10,})/p/", html_text))
                 
                 new_items_found = 0
@@ -161,7 +159,7 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         time.sleep(1)
 
     return sku_to_page
-
+    
 # --- Excel Generator ---
 def generate_excel_export(sku_to_page_map, country_path):
     wb = openpyxl.Workbook()
