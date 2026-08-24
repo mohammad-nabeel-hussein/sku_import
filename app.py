@@ -12,7 +12,7 @@ import streamlit as st
 # --- ZenRows API Key Integration ---
 ZENROWS_API_KEY = "a937e177ab01370d56a8fd844836a5cd7ea18486"
 
-# --- Page Config ---
+# --- Page Config (Forces Sidebar Always Expanded) ---
 st.set_page_config(
     page_title="Noon SKU Extractor Dashboard", 
     page_icon="🛍️", 
@@ -20,28 +20,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS Styling (Sidebar Restored & Locked) ---
+# --- CSS Styling (Removes Collapse Button Without Hiding Sidebar) ---
 st.markdown("""
 <style>
-    /* Hide the top close arrow button inside the sidebar */
+    /* Hide the top collapse arrow inside sidebar */
     button[data-testid="stSidebarCollapseButton"],
     [data-testid="stSidebarCollapseButton"],
     button[aria-label="Close sidebar"] {
         display: none !important;
     }
 
-    /* Hide the open arrow button if collapsed */
-    [data-testid="collapsedControl"] {
-        display: none !important;
-    }
-
-    /* Lock sidebar width cleanly without hiding the section */
+    /* Lock sidebar width */
     [data-testid="stSidebar"] {
         min-width: 320px !important;
         max-width: 320px !important;
     }
 
-    /* Hide default Streamlit headers & footers */
+    /* Hide standard Streamlit header & footer */
     header[data-testid="stHeader"] { display: none !important; }
     footer { visibility: hidden !important; height: 0px !important; }
     #MainMenu { visibility: hidden !important; }
@@ -121,14 +116,12 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         status_placeholder.info(f"Fetching Page {current_page} of {end_p} via Internal API...")
 
         formatted_query = query.strip()
-        
-        # Target Noon's direct JSON API endpoint instead of the heavy HTML frontend
         target_noon_url = f"https://www.noon.com/_svc/catalog/api/v3/u/{cat_slug}/?limit=50&page={current_page}&q={formatted_query}"
         
         params = {
             "apikey": ZENROWS_API_KEY.strip(),
             "url": target_noon_url,
-            "js_render": "false"  # Direct API payload requires no JS rendering
+            "js_render": "false"
         }
         
         headers = {
@@ -138,7 +131,6 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         try:
             res = session.get("https://api.zenrows.com/v1/", params=params, headers=headers, timeout=30)
 
-            # Fallback to search endpoint if category endpoint fails
             if res.status_code != 200:
                 alt_url = f"https://www.noon.com/_svc/catalog/api/v3/s/?limit=50&page={current_page}&q={formatted_query}"
                 params["url"] = alt_url
@@ -147,7 +139,6 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
             if res.status_code == 200:
                 new_items_found = 0
                 
-                # Attempt structured JSON parsing
                 try:
                     data = res.json()
                     catalog = data.get("catalog", {}).get("megaDirectory", []) or data.get("hits", []) or data.get("catalog", {}).get("records", [])
@@ -159,7 +150,6 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
                 except Exception:
                     pass
 
-                # Regex fallback on raw API response
                 if new_items_found == 0:
                     found_skus = set(re.findall(r'/([A-Z0-9]{10,})/p/', res.text))
                     for sku in found_skus:
