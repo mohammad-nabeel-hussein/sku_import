@@ -1,5 +1,5 @@
 import io
-import re  # <--- Add this line
+import re
 import time
 from datetime import datetime
 import pandas as pd
@@ -9,8 +9,8 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import streamlit as st
 
-# --- ScraperAPI Key Integration ---
-SCRAPER_API_KEY = "955f333964f3d5f59e0ed5f4037d6ea1"
+# --- ZenRows API Key Integration ---
+ZENROWS_API_KEY = "a937e177ab01370d56a8fd844836a5cd7ea18486"
 
 # --- Page Config ---
 st.set_page_config(
@@ -91,7 +91,7 @@ m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-# --- Lightweight JSON Scraper Engine ---
+# --- ZenRows Anti-Bot Scraper Engine ---
 def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     sku_to_page = {}
     total_pages = (end_p - start_p) + 1
@@ -99,50 +99,40 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     pages_done = 0
 
     session = requests.Session()
-    
-    # Modern browser headers matching standard web clients
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "X-Locale": country_path,
-        "X-Platform": "web"
-    }
 
     for current_page in range(start_p, end_p + 1):
-        status_placeholder.info(f"Fetching Page {current_page} of {end_p}...")
+        status_placeholder.info(f"Fetching Page {current_page} of {end_p} via ZenRows Anti-Bot Bypass...")
 
-        formatted_query = query.strip()
+        formatted_query = query.strip().replace(" ", "+")
         
-        # Primary endpoint for catalog search
-        api_url = f"https://www.noon.com/_svc/catalog/api/v3/u/{cat_slug}/?limit=50&page={current_page}&q={formatted_query}"
+        if cat_slug and cat_slug != "custom":
+            target_noon_url = f"https://www.noon.com/{country_path}/{cat_slug}/?page={current_page}&q={formatted_query}"
+        else:
+            target_noon_url = f"https://www.noon.com/{country_path}/search/?page={current_page}&q={formatted_query}"
+        
+        # ZenRows Anti-Bot Configuration
+        params = {
+            "api_key": ZENROWS_API_KEY,
+            "url": target_noon_url,
+            "js_render": "true",
+            "premium_proxy": "true",
+            "proxy_country": "sa"
+        }
 
         try:
-            res = session.get(api_url, headers=headers, timeout=15)
-
-            # Fallback endpoint if category path differs
-            if res.status_code != 200:
-                alt_url = f"https://www.noon.com/_svc/catalog/api/v3/s/?limit=50&page={current_page}&q={formatted_query}"
-                res = session.get(alt_url, headers=headers, timeout=15)
+            res = session.get("https://api.zenrows.com/v1/", params=params, timeout=60)
 
             if res.status_code == 200:
-                data = res.json()
-                catalog = data.get("catalog", {}).get("megaDirectory", []) or data.get("hits", []) or data.get("catalog", {}).get("records", [])
+                html_text = res.text
+                
+                # Extract Noon product SKUs
+                found_skus = set(re.findall(r"/([A-Z0-9]{10,})/p/", html_text))
                 
                 new_items_found = 0
-                for item in catalog:
-                    sku = item.get("sku") or item.get("sku_code")
-                    if sku and sku not in sku_to_page:
+                for sku in found_skus:
+                    if sku not in sku_to_page:
                         sku_to_page[sku] = current_page
                         new_items_found += 1
-
-                # Regex fallback on raw JSON string if structure varies
-                if new_items_found == 0:
-                    found_skus = set(re.findall(r'/([A-Z0-9]{10,})/p/', res.text))
-                    for sku in found_skus:
-                        if sku not in sku_to_page:
-                            sku_to_page[sku] = current_page
-                            new_items_found += 1
 
                 if new_items_found == 0 and len(sku_to_page) > 0:
                     status_placeholder.warning(f"No new SKUs found on page {current_page}. Stopping.")
@@ -168,10 +158,10 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         m_skus.metric("SKUs Collected", len(sku_to_page))
         m_eta.metric("Estimated ETA", eta_str)
 
-        time.sleep(0.5)
+        time.sleep(1)
 
     return sku_to_page
-    
+
 # --- Excel Generator ---
 def generate_excel_export(sku_to_page_map, country_path):
     wb = openpyxl.Workbook()
