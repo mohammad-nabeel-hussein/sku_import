@@ -11,7 +11,6 @@ import streamlit as st
 
 # --- ZenRows API Key Integration ---
 ZENROWS_API_KEY = "a937e177ab01370d56a8fd844836a5cd7ea18486"
-
 # --- Page Config ---
 st.set_page_config(
     page_title="Noon SKU Extractor Dashboard", 
@@ -91,7 +90,9 @@ m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-# --- ZenRows Anti-Bot Scraper Engine (Fixed 401 Authorization) ---
+from urllib.parse import quote
+
+# --- ZenRows Scraper Engine (Url-Encoded Request) ---
 def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     sku_to_page = {}
     total_pages = (end_p - start_p) + 1
@@ -110,20 +111,14 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         else:
             target_noon_url = f"https://www.noon.com/{country_path}/search/?page={current_page}&q={formatted_query}"
         
-        # Standard JS render parameter (Compatible with Free Tier)
-        params = {
-            "api_key": ZENROWS_API_KEY,
-            "url": target_noon_url,
-            "js_render": "true"
-        }
+        encoded_url = quote(target_noon_url, safe='')
+        zenrows_endpoint = f"https://api.zenrows.com/v1/?api_key={ZENROWS_API_KEY}&url={encoded_url}&js_render=true"
 
         try:
-            res = session.get("https://api.zenrows.com/v1/", params=params, timeout=60)
+            res = session.get(zenrows_endpoint, timeout=60)
 
             if res.status_code == 200:
                 html_text = res.text
-                
-                # Extract Noon product SKUs matching catalog pattern
                 found_skus = set(re.findall(r"/([A-Z0-9]{10,})/p/", html_text))
                 
                 new_items_found = 0
