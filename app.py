@@ -12,32 +12,13 @@ import streamlit as st
 # --- ZenRows API Key Integration ---
 ZENROWS_API_KEY = "a937e177ab01370d56a8fd844836a5cd7ea18486"
 
-# --- Page Config (Forces Sidebar Always Expanded) ---
+# --- Page Config (Guarantees Sidebar Expanded) ---
 st.set_page_config(
     page_title="Noon SKU Extractor Dashboard", 
     page_icon="🛍️", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# --- CSS Styling (Fixed Sidebar Visibility) ---
-st.markdown("""
-<style>
-    /* Hide the sidebar collapse button icon cleanly */
-    button[kind="header"] { display: none !important; }
-    [data-testid="stSidebarNavCollapseButton"] { display: none !important; }
-    
-    /* Set fixed width without breaking layout flexbox */
-    section[data-testid="stSidebar"] {
-        width: 320px !important;
-    }
-    
-    /* Hide top header bar & footer */
-    header[data-testid="stHeader"] { display: none !important; }
-    footer { visibility: hidden !important; height: 0px !important; }
-    #MainMenu { visibility: hidden !important; }
-</style>
-""", unsafe_allow_html=True)
 
 CATEGORY_MAP = {
     "Toys & Games": "toys-and-games",
