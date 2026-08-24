@@ -20,20 +20,28 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS Styling ---
+# --- CSS Styling (Sidebar Restored & Locked) ---
 st.markdown("""
 <style>
-    /* Hide the collapse control arrow when sidebar is collapsed */
-    [data-testid="collapsedControl"] { display: none !important; }
-    
-    /* Hide the close button arrow inside the sidebar header */
-    [data-testid="stSidebarCollapseButton"] { display: none !important; }
-    button[aria-label="Close sidebar"] { display: none !important; }
-    
-    /* Fix sidebar width and lock it in place */
-    section[data-testid="stSidebar"] { width: 320px !important; min-width: 320px !important; }
-    
-    /* Hide Streamlit default header and footer elements */
+    /* Hide the top close arrow button inside the sidebar */
+    button[data-testid="stSidebarCollapseButton"],
+    [data-testid="stSidebarCollapseButton"],
+    button[aria-label="Close sidebar"] {
+        display: none !important;
+    }
+
+    /* Hide the open arrow button if collapsed */
+    [data-testid="collapsedControl"] {
+        display: none !important;
+    }
+
+    /* Lock sidebar width cleanly without hiding the section */
+    [data-testid="stSidebar"] {
+        min-width: 320px !important;
+        max-width: 320px !important;
+    }
+
+    /* Hide default Streamlit headers & footers */
     header[data-testid="stHeader"] { display: none !important; }
     footer { visibility: hidden !important; height: 0px !important; }
     #MainMenu { visibility: hidden !important; }
