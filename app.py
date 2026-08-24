@@ -90,7 +90,7 @@ m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-# --- Proxy Scraper Engine (Bypasses Cloudflare on Streamlit Cloud) ---
+# --- Proxy Scraper Engine (Fixes HTTP 500 Error) ---
 def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     sku_to_page = {}
     total_pages = (end_p - start_p) + 1
@@ -102,18 +102,23 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     for current_page in range(start_p, end_p + 1):
         status_placeholder.info(f"Fetching Page {current_page} of {end_p} via Proxy...")
 
-        target_noon_url = f"https://www.noon.com/{country_path}/{cat_slug}/?page={current_page}&q={query}"
+        # Formulate clean search URL
+        formatted_query = query.strip().replace(" ", "+")
+        if cat_slug and cat_slug != "custom":
+            target_noon_url = f"https://www.noon.com/{country_path}/{cat_slug}/?page={current_page}&q={formatted_query}"
+        else:
+            target_noon_url = f"https://www.noon.com/{country_path}/search/?page={current_page}&q={formatted_query}"
         
-        # Route request through ScraperAPI proxy
-        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={target_noon_url}&render=true"
+        # ScraperAPI call without JS render parameter to avoid 500 errors
+        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={target_noon_url}&country_code=sa"
 
         try:
-            res = session.get(proxy_url, timeout=60)
+            res = session.get(proxy_url, timeout=45)
 
             if res.status_code == 200:
                 html_text = res.text
                 
-                # Extract all 10+ character product SKUs using Regex
+                # Extract product SKUs matching Noon's catalog pattern (e.g. N12345678A or Z12345678A)
                 found_skus = set(re.findall(r"/([A-Z0-9]{10,})/p/", html_text))
                 
                 new_items_found = 0
@@ -149,7 +154,6 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         time.sleep(1)
 
     return sku_to_page
-
 # --- Excel Generator ---
 def generate_excel_export(sku_to_page_map, country_path):
     wb = openpyxl.Workbook()
