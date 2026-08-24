@@ -91,7 +91,7 @@ m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-# --- Resilient Proxy & Direct Scraper Engine ---
+# --- Lightweight JSON Scraper Engine ---
 def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     sku_to_page = {}
     total_pages = (end_p - start_p) + 1
@@ -99,56 +99,60 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     pages_done = 0
 
     session = requests.Session()
+    
+    # Modern browser headers matching standard web clients
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "X-Locale": country_path,
+        "X-Platform": "web"
+    }
 
     for current_page in range(start_p, end_p + 1):
         status_placeholder.info(f"Fetching Page {current_page} of {end_p}...")
 
-        formatted_query = query.strip().replace(" ", "+")
+        formatted_query = query.strip()
         
-        # Build target URLs
-        if cat_slug and cat_slug != "custom":
-            target_noon_url = f"https://www.noon.com/{country_path}/{cat_slug}/?page={current_page}&q={formatted_query}"
-        else:
-            target_noon_url = f"https://www.noon.com/{country_path}/search/?page={current_page}&q={formatted_query}"
-        
-        # Enable premium residential proxy on ScraperAPI with extended timeout
-        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={target_noon_url}&residential=true&country_code=sa"
+        # Primary endpoint for catalog search
+        api_url = f"https://www.noon.com/_svc/catalog/api/v3/u/{cat_slug}/?limit=50&page={current_page}&q={formatted_query}"
 
-        res = None
         try:
-            # 1. Try ScraperAPI with residential proxy
-            res = session.get(proxy_url, timeout=40)
-        except Exception:
-            # 2. Direct fallback attempt with custom headers if ScraperAPI times out
-            try:
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.9",
-                }
-                res = session.get(target_noon_url, headers=headers, timeout=15)
-            except Exception as direct_err:
-                status_placeholder.error(f"Error on page {current_page}: Request timed out on both proxy and direct connection.")
+            res = session.get(api_url, headers=headers, timeout=15)
+
+            # Fallback endpoint if category path differs
+            if res.status_code != 200:
+                alt_url = f"https://www.noon.com/_svc/catalog/api/v3/s/?limit=50&page={current_page}&q={formatted_query}"
+                res = session.get(alt_url, headers=headers, timeout=15)
+
+            if res.status_code == 200:
+                data = res.json()
+                catalog = data.get("catalog", {}).get("megaDirectory", []) or data.get("hits", []) or data.get("catalog", {}).get("records", [])
+                
+                new_items_found = 0
+                for item in catalog:
+                    sku = item.get("sku") or item.get("sku_code")
+                    if sku and sku not in sku_to_page:
+                        sku_to_page[sku] = current_page
+                        new_items_found += 1
+
+                # Regex fallback on raw JSON string if structure varies
+                if new_items_found == 0:
+                    found_skus = set(re.findall(r'/([A-Z0-9]{10,})/p/', res.text))
+                    for sku in found_skus:
+                        if sku not in sku_to_page:
+                            sku_to_page[sku] = current_page
+                            new_items_found += 1
+
+                if new_items_found == 0 and len(sku_to_page) > 0:
+                    status_placeholder.warning(f"No new SKUs found on page {current_page}. Stopping.")
+                    break
+            else:
+                status_placeholder.error(f"Page {current_page} returned HTTP {res.status_code}.")
                 break
 
-        if res and res.status_code == 200:
-            html_text = res.text
-            
-            # Extract SKUs matching Noon pattern (e.g. N12345678A, Z12345678A)
-            found_skus = set(re.findall(r"/([A-Z0-9]{10,})/p/", html_text))
-            
-            new_items_found = 0
-            for sku in found_skus:
-                if sku not in sku_to_page:
-                    sku_to_page[sku] = current_page
-                    new_items_found += 1
-
-            if new_items_found == 0 and len(sku_to_page) > 0:
-                status_placeholder.warning(f"No new SKUs found on page {current_page}. Stopping.")
-                break
-        else:
-            status_code = res.status_code if res else "No Response"
-            status_placeholder.error(f"Page {current_page} returned HTTP {status_code}.")
+        except Exception as e:
+            status_placeholder.error(f"Error on page {current_page}: {e}")
             break
 
         pages_done += 1
@@ -164,7 +168,7 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         m_skus.metric("SKUs Collected", len(sku_to_page))
         m_eta.metric("Estimated ETA", eta_str)
 
-        time.sleep(1)
+        time.sleep(0.5)
 
     return sku_to_page
     
