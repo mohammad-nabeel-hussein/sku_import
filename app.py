@@ -6,6 +6,7 @@ try:
     subprocess.run(["playwright", "install", "chromium"], check=True)
 except Exception as e:
     print(f"Playwright installation check failed: {e}")
+
 import io
 import re
 import time
@@ -17,7 +18,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-# --- Page Config (Lock Sidebar to Expanded) ---
+# --- Page Config ---
 st.set_page_config(
     page_title="Noon SKU Extractor Dashboard", 
     page_icon="🛍️", 
@@ -28,19 +29,14 @@ st.set_page_config(
 # --- CSS to Lock Sidebar Open & Remove Collapse Arrow ---
 st.markdown("""
 <style>
-    /* Hide top-left collapse arrow icon */
-    [data-testid="collapsedControl"] {
-        display: none !important;
-    }
-    /* Ensure sidebar stays fixed at full width */
-    section[data-testid="stSidebar"] {
-        width: 320px !important;
-        min-width: 320px !important;
-    }
+    [data-testid="collapsedControl"] { display: none !important; }
+    section[data-testid="stSidebar"] { width: 320px !important; min-width: 320px !important; }
+    header[data-testid="stHeader"] { display: none !important; }
+    footer { visibility: hidden !important; height: 0px !important; }
+    #MainMenu { visibility: hidden !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# Category Mapping
 CATEGORY_MAP = {
     "Toys & Games": "toys-and-games",
     "Health & Nutrition": "health",
@@ -48,11 +44,10 @@ CATEGORY_MAP = {
     "Other / Custom Slug": "custom"
 }
 
-# Session State for History Tracking
 if "scrape_history" not in st.session_state:
     st.session_state.scrape_history = []
 
-# --- STATIC SIDEBAR: Configuration & History ---
+# --- STATIC SIDEBAR ---
 st.sidebar.header("⚙️ Search Configuration")
 
 country = st.sidebar.selectbox("Store Country", options=["Saudi Arabia", "UAE"], index=0)
@@ -88,7 +83,6 @@ else:
 st.title("🛍️ Noon SKU Extractor Dashboard")
 st.caption("Configure parameters in the sidebar and run extraction.")
 
-# Layout Placeholders for Real-time Execution Data
 progress_placeholder = st.empty()
 status_placeholder = st.empty()
 
@@ -97,14 +91,13 @@ m_page = metrics_cols[0].empty()
 m_skus = metrics_cols[1].empty()
 m_eta = metrics_cols[2].empty()
 
-# Initial Dashboard State
 m_page.metric("Page Progress", f"- / -")
 m_skus.metric("SKUs Collected", "0")
 m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-# --- Scraper Engine ---
+# --- Scraper Engine (Bypasses HTTP2 Errors & Cloudflare) ---
 def run_sequential_scraper(country_path, cat_slug, query, start_p, end_p):
     formatted_query = query.strip().replace(" ", "+")
     clean_cat = cat_slug.strip().strip("/")
@@ -117,23 +110,42 @@ def run_sequential_scraper(country_path, cat_slug, query, start_p, end_p):
     pages_done = 0
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800}
+        # Launch browser with Chrome flags to bypass HTTP2 reset errors
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-http2",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled"
+            ]
         )
+        
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={"width": 1366, "height": 768},
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            }
+        )
+        
+        page = context.new_page()
         
         for current_page in range(start_p, end_p + 1):
             target_url = f"https://www.noon.com/{country_path}/{clean_cat}/?page={current_page}&q={formatted_query}"
             status_placeholder.info(f"Fetching Page {current_page} of {end_p}...")
             
             try:
-                page.goto(target_url, timeout=60000, wait_until="domcontentloaded")
+                # Use commit wait strategy to prevent HTTP2 stream reset aborts
+                response = page.goto(target_url, timeout=45000, wait_until="commit")
+                page.wait_for_timeout(3000)
             except Exception as e:
                 status_placeholder.error(f"Error loading page {current_page}: {e}")
                 break
 
-            for _ in range(4):
+            for _ in range(5):
                 page.mouse.wheel(0, 1500)
                 page.wait_for_timeout(800)
 
@@ -171,7 +183,7 @@ def run_sequential_scraper(country_path, cat_slug, query, start_p, end_p):
                 status_placeholder.warning(f"No new SKUs on page {current_page}. Stopping.")
                 break
 
-            time.sleep(1)
+            time.sleep(1.5)
 
         browser.close()
         
