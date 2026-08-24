@@ -23,8 +23,17 @@ st.set_page_config(
 # --- CSS Styling ---
 st.markdown("""
 <style>
+    /* Hide the collapse control arrow when sidebar is collapsed */
     [data-testid="collapsedControl"] { display: none !important; }
+    
+    /* Hide the close button arrow inside the sidebar header */
+    [data-testid="stSidebarCollapseButton"] { display: none !important; }
+    button[aria-label="Close sidebar"] { display: none !important; }
+    
+    /* Fix sidebar width and lock it in place */
     section[data-testid="stSidebar"] { width: 320px !important; min-width: 320px !important; }
+    
+    /* Hide Streamlit default header and footer elements */
     header[data-testid="stHeader"] { display: none !important; }
     footer { visibility: hidden !important; height: 0px !important; }
     #MainMenu { visibility: hidden !important; }
