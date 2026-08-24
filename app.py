@@ -91,7 +91,7 @@ m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-# --- ZenRows Anti-Bot Engine (Header Authentication Fix) ---
+# --- ZenRows API Engine (Internal JSON API Bypass) ---
 def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     sku_to_page = {}
     total_pages = (end_p - start_p) + 1
@@ -101,20 +101,17 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     session = requests.Session()
 
     for current_page in range(start_p, end_p + 1):
-        status_placeholder.info(f"Fetching Page {current_page} of {end_p} via ZenRows...")
+        status_placeholder.info(f"Fetching Page {current_page} of {end_p} via Internal API...")
 
-        formatted_query = query.strip().replace(" ", "+")
+        formatted_query = query.strip()
         
-        if cat_slug and cat_slug != "custom":
-            target_noon_url = f"https://www.noon.com/{country_path}/{cat_slug}/?page={current_page}&q={formatted_query}"
-        else:
-            target_noon_url = f"https://www.noon.com/{country_path}/search/?page={current_page}&q={formatted_query}"
+        # Target Noon's direct JSON API endpoint instead of the heavy HTML frontend
+        target_noon_url = f"https://www.noon.com/_svc/catalog/api/v3/u/{cat_slug}/?limit=50&page={current_page}&q={formatted_query}"
         
-        # Dual-authentication fallback payload
         params = {
             "apikey": ZENROWS_API_KEY.strip(),
             "url": target_noon_url,
-            "js_render": "true"
+            "js_render": "false"  # Direct API payload requires no JS rendering
         }
         
         headers = {
@@ -122,19 +119,36 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         }
 
         try:
-            res = session.get("https://api.zenrows.com/v1/", params=params, headers=headers, timeout=60)
+            res = session.get("https://api.zenrows.com/v1/", params=params, headers=headers, timeout=30)
+
+            # Fallback to search endpoint if category endpoint fails
+            if res.status_code != 200:
+                alt_url = f"https://www.noon.com/_svc/catalog/api/v3/s/?limit=50&page={current_page}&q={formatted_query}"
+                params["url"] = alt_url
+                res = session.get("https://api.zenrows.com/v1/", params=params, headers=headers, timeout=30)
 
             if res.status_code == 200:
-                html_text = res.text
-                
-                # Regex extraction for Noon product SKUs
-                found_skus = set(re.findall(r"/([A-Z0-9]{10,})/p/", html_text))
-                
                 new_items_found = 0
-                for sku in found_skus:
-                    if sku not in sku_to_page:
-                        sku_to_page[sku] = current_page
-                        new_items_found += 1
+                
+                # Attempt structured JSON parsing
+                try:
+                    data = res.json()
+                    catalog = data.get("catalog", {}).get("megaDirectory", []) or data.get("hits", []) or data.get("catalog", {}).get("records", [])
+                    for item in catalog:
+                        sku = item.get("sku") or item.get("sku_code")
+                        if sku and sku not in sku_to_page:
+                            sku_to_page[sku] = current_page
+                            new_items_found += 1
+                except Exception:
+                    pass
+
+                # Regex fallback on raw API response
+                if new_items_found == 0:
+                    found_skus = set(re.findall(r'/([A-Z0-9]{10,})/p/', res.text))
+                    for sku in found_skus:
+                        if sku not in sku_to_page:
+                            sku_to_page[sku] = current_page
+                            new_items_found += 1
 
                 if new_items_found == 0 and len(sku_to_page) > 0:
                     status_placeholder.warning(f"No new SKUs found on page {current_page}. Stopping.")
@@ -160,7 +174,7 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         m_skus.metric("SKUs Collected", len(sku_to_page))
         m_eta.metric("Estimated ETA", eta_str)
 
-        time.sleep(1)
+        time.sleep(0.5)
 
     return sku_to_page
 
