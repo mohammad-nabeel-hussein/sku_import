@@ -8,6 +8,9 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import streamlit as st
 
+# --- ScraperAPI Key Integration ---
+SCRAPER_API_KEY = "955f333964f3d5f59e0ed5f4037d6ea1"
+
 # --- Page Config ---
 st.set_page_config(
     page_title="Noon SKU Extractor Dashboard", 
@@ -87,44 +90,35 @@ m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-# --- Fast API Scraper Engine ---
-def run_api_scraper(country_path, cat_slug, query, start_p, end_p):
+# --- Proxy Scraper Engine (Bypasses Cloudflare on Streamlit Cloud) ---
+def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     sku_to_page = {}
     total_pages = (end_p - start_p) + 1
     start_time = time.time()
     pages_done = 0
 
-    # API Headers emulating web app client
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "X-Locale": country_path,
-        "X-Platform": "web"
-    }
-
     session = requests.Session()
 
     for current_page in range(start_p, end_p + 1):
-        status_placeholder.info(f"Fetching Page {current_page} of {end_p}...")
+        status_placeholder.info(f"Fetching Page {current_page} of {end_p} via Proxy...")
 
-        api_url = f"https://www.noon.com/_svc/catalog/api/v3/u/{cat_slug}/?limit=50&page={current_page}&q={query}"
+        target_noon_url = f"https://www.noon.com/{country_path}/{cat_slug}/?page={current_page}&q={query}"
+        
+        # Route request through ScraperAPI proxy
+        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={target_noon_url}&render=true"
 
         try:
-            res = session.get(api_url, headers=headers, timeout=15)
-            
-            # If standard catalog endpoint fails, fallback to direct search API
-            if res.status_code != 200:
-                fallback_url = f"https://www.noon.com/_svc/catalog/api/v3/s/?limit=50&page={current_page}&q={query}"
-                res = session.get(fallback_url, headers=headers, timeout=15)
+            res = session.get(proxy_url, timeout=60)
 
             if res.status_code == 200:
-                data = res.json()
-                catalog = data.get("catalog", {}).get("megaDirectory", []) or data.get("hits", [])
+                html_text = res.text
+                
+                # Extract all 10+ character product SKUs using Regex
+                found_skus = set(re.findall(r"/([A-Z0-9]{10,})/p/", html_text))
                 
                 new_items_found = 0
-                for item in catalog:
-                    sku = item.get("sku") or item.get("sku_code")
-                    if sku and sku not in sku_to_page:
+                for sku in found_skus:
+                    if sku not in sku_to_page:
                         sku_to_page[sku] = current_page
                         new_items_found += 1
 
@@ -152,7 +146,7 @@ def run_api_scraper(country_path, cat_slug, query, start_p, end_p):
         m_skus.metric("SKUs Collected", len(sku_to_page))
         m_eta.metric("Estimated ETA", eta_str)
 
-        time.sleep(0.5)
+        time.sleep(1)
 
     return sku_to_page
 
@@ -246,7 +240,7 @@ if start_btn:
     else:
         st_start_time = time.time()
 
-        extracted_skus = run_api_scraper(
+        extracted_skus = run_proxy_scraper(
             country_code, category_slug, search_term, start_page, end_page
         )
 
@@ -256,7 +250,7 @@ if start_btn:
             st.error("No SKUs found. Check your search query or page range.")
         else:
             st.balloons()
-            status_placeholder.success(f"Extracted {len(extracted_skus)} products in {elapsed_sec} seconds!")
+            status_placeholder.success(f"Successfully extracted {len(extracted_skus)} products in {elapsed_sec} seconds!")
 
             st.session_state.scrape_history.append({
                 "Time": datetime.now().strftime("%H:%M:%S"),
