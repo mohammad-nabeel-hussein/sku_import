@@ -1,22 +1,12 @@
-import os
-import subprocess
-
-# Ensure Playwright Chromium binary is installed on startup
-try:
-    subprocess.run(["playwright", "install", "chromium"], check=True)
-except Exception as e:
-    print(f"Playwright installation check failed: {e}")
-
 import io
-import re
 import time
 from datetime import datetime
 import pandas as pd
-import streamlit as st
-from playwright.sync_api import sync_playwright
+import requests
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+import streamlit as st
 
 # --- Page Config ---
 st.set_page_config(
@@ -26,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS to Lock Sidebar Open & Remove Collapse Arrow ---
+# --- CSS Styling ---
 st.markdown("""
 <style>
     [data-testid="collapsedControl"] { display: none !important; }
@@ -97,96 +87,73 @@ m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-# --- Scraper Engine (Bypasses HTTP2 Errors & Cloudflare) ---
-def run_sequential_scraper(country_path, cat_slug, query, start_p, end_p):
-    formatted_query = query.strip().replace(" ", "+")
-    clean_cat = cat_slug.strip().strip("/")
-    
+# --- Fast API Scraper Engine ---
+def run_api_scraper(country_path, cat_slug, query, start_p, end_p):
     sku_to_page = {}
-    seen_skus = set()
     total_pages = (end_p - start_p) + 1
-    
     start_time = time.time()
     pages_done = 0
-    
-    with sync_playwright() as p:
-        # Launch browser with Chrome flags to bypass HTTP2 reset errors
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-http2",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled"
-            ]
-        )
-        
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={"width": 1366, "height": 768},
-            extra_http_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
-            }
-        )
-        
-        page = context.new_page()
-        
-        for current_page in range(start_p, end_p + 1):
-            target_url = f"https://www.noon.com/{country_path}/{clean_cat}/?page={current_page}&q={formatted_query}"
-            status_placeholder.info(f"Fetching Page {current_page} of {end_p}...")
+
+    # API Headers emulating web app client
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "X-Locale": country_path,
+        "X-Platform": "web"
+    }
+
+    session = requests.Session()
+
+    for current_page in range(start_p, end_p + 1):
+        status_placeholder.info(f"Fetching Page {current_page} of {end_p}...")
+
+        api_url = f"https://www.noon.com/_svc/catalog/api/v3/u/{cat_slug}/?limit=50&page={current_page}&q={query}"
+
+        try:
+            res = session.get(api_url, headers=headers, timeout=15)
             
-            try:
-                # Use commit wait strategy to prevent HTTP2 stream reset aborts
-                response = page.goto(target_url, timeout=45000, wait_until="commit")
-                page.wait_for_timeout(3000)
-            except Exception as e:
-                status_placeholder.error(f"Error loading page {current_page}: {e}")
+            # If standard catalog endpoint fails, fallback to direct search API
+            if res.status_code != 200:
+                fallback_url = f"https://www.noon.com/_svc/catalog/api/v3/s/?limit=50&page={current_page}&q={query}"
+                res = session.get(fallback_url, headers=headers, timeout=15)
+
+            if res.status_code == 200:
+                data = res.json()
+                catalog = data.get("catalog", {}).get("megaDirectory", []) or data.get("hits", [])
+                
+                new_items_found = 0
+                for item in catalog:
+                    sku = item.get("sku") or item.get("sku_code")
+                    if sku and sku not in sku_to_page:
+                        sku_to_page[sku] = current_page
+                        new_items_found += 1
+
+                if new_items_found == 0 and len(sku_to_page) > 0:
+                    status_placeholder.warning(f"No new SKUs found on page {current_page}. Stopping.")
+                    break
+            else:
+                status_placeholder.error(f"Page {current_page} returned HTTP {res.status_code}.")
                 break
 
-            for _ in range(5):
-                page.mouse.wheel(0, 1500)
-                page.wait_for_timeout(800)
+        except Exception as e:
+            status_placeholder.error(f"Error loading page {current_page}: {e}")
+            break
 
-            all_links = page.eval_on_selector_all("a", "elements => elements.map(e => e.href)")
-            pattern = r"/([A-Z0-9]{10,})/p/"
-            page_skus = set()
-            
-            for link in all_links:
-                match = re.search(pattern, link)
-                if match:
-                    page_skus.add(match.group(1))
+        pages_done += 1
+        pct = pages_done / total_pages
+        progress_placeholder.progress(pct)
 
-            new_skus = page_skus - seen_skus
+        elapsed = time.time() - start_time
+        avg_time = elapsed / pages_done
+        eta_seconds = int((total_pages - pages_done) * avg_time)
+        eta_str = time.strftime("%M:%S", time.gmtime(eta_seconds)) if eta_seconds > 0 else "00:00"
 
-            for sku in page_skus:
-                if sku not in seen_skus:
-                    seen_skus.add(sku)
-                    sku_to_page[sku] = current_page
+        m_page.metric("Page Progress", f"{current_page} / {end_p}")
+        m_skus.metric("SKUs Collected", len(sku_to_page))
+        m_eta.metric("Estimated ETA", eta_str)
 
-            pages_done += 1
-            
-            pct = pages_done / total_pages
-            progress_placeholder.progress(pct)
-            
-            elapsed = time.time() - start_time
-            avg_time = elapsed / pages_done
-            eta_seconds = int((total_pages - pages_done) * avg_time)
-            eta_str = time.strftime("%M:%S", time.gmtime(eta_seconds)) if eta_seconds > 0 else "00:00"
-            
-            m_page.metric("Page Progress", f"{current_page} / {end_p}")
-            m_skus.metric("SKUs Collected", len(sku_to_page))
-            m_eta.metric("Estimated ETA", eta_str)
+        time.sleep(0.5)
 
-            if not page_skus or len(new_skus) == 0:
-                status_placeholder.warning(f"No new SKUs on page {current_page}. Stopping.")
-                break
-
-            time.sleep(1.5)
-
-        browser.close()
-        
     return sku_to_page
 
 # --- Excel Generator ---
@@ -212,18 +179,18 @@ def generate_excel_export(sku_to_page_map, country_path):
         cell.fill, cell.font, cell.alignment, cell.border = header_fill, header_font, align_center, border_thin
 
     sorted_skus = sorted(sku_to_page_map.items(), key=lambda x: (x[1], x[0]))
-    
+
     for idx, (sku, p_num) in enumerate(sorted_skus, start=1):
         row_idx = idx + 1
         product_url = f"https://www.noon.com/{country_path}/{sku}/p/"
         ws_detailed.append([idx, sku, f"Page {p_num}", product_url])
         ws_detailed.row_dimensions[row_idx].height = 20
-        
+
         c1, c2, c3, c4 = [ws_detailed.cell(row=row_idx, column=i) for i in range(1, 5)]
         c1.alignment = c2.alignment = c3.alignment = align_center
         c4.alignment = align_left
         c1.border = c2.border = c3.border = c4.border = border_thin
-        
+
         if row_idx % 2 == 0:
             zebra = PatternFill(start_color="F2F5F9", end_color="F2F5F9", fill_type="solid")
             c1.fill = c2.fill = c3.fill = c4.fill = zebra
@@ -278,13 +245,13 @@ if start_btn:
         st.warning("Please enter a search term.")
     else:
         st_start_time = time.time()
-        
-        extracted_skus = run_sequential_scraper(
+
+        extracted_skus = run_api_scraper(
             country_code, category_slug, search_term, start_page, end_page
         )
-            
+
         elapsed_sec = round(time.time() - st_start_time, 2)
-        
+
         if not extracted_skus:
             st.error("No SKUs found. Check your search query or page range.")
         else:
@@ -317,7 +284,7 @@ if start_btn:
                 st.divider()
                 st.subheader("📬 Export Downloads")
                 col_exp1, col_exp2 = st.columns(2)
-                
+
                 with col_exp1:
                     st.download_button(
                         label="📊 Download Excel (.xlsx)",
