@@ -11,6 +11,7 @@ import streamlit as st
 
 # --- ZenRows API Key Integration ---
 ZENROWS_API_KEY = "a937e177ab01370d56a8fd844836a5cd7ea18486"
+
 # --- Page Config ---
 st.set_page_config(
     page_title="Noon SKU Extractor Dashboard", 
@@ -90,9 +91,7 @@ m_eta.metric("Estimated ETA", "00:00")
 
 download_area = st.container()
 
-from urllib.parse import quote
-
-# --- ZenRows Scraper Engine (Url-Encoded Request) ---
+# --- ZenRows Anti-Bot Engine (Header Authentication Fix) ---
 def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
     sku_to_page = {}
     total_pages = (end_p - start_p) + 1
@@ -111,14 +110,24 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         else:
             target_noon_url = f"https://www.noon.com/{country_path}/search/?page={current_page}&q={formatted_query}"
         
-        encoded_url = quote(target_noon_url, safe='')
-        zenrows_endpoint = f"https://api.zenrows.com/v1/?api_key={ZENROWS_API_KEY}&url={encoded_url}&js_render=true"
+        # Dual-authentication fallback payload
+        params = {
+            "apikey": ZENROWS_API_KEY.strip(),
+            "url": target_noon_url,
+            "js_render": "true"
+        }
+        
+        headers = {
+            "X-Zenrows-Apikey": ZENROWS_API_KEY.strip()
+        }
 
         try:
-            res = session.get(zenrows_endpoint, timeout=60)
+            res = session.get("https://api.zenrows.com/v1/", params=params, headers=headers, timeout=60)
 
             if res.status_code == 200:
                 html_text = res.text
+                
+                # Regex extraction for Noon product SKUs
                 found_skus = set(re.findall(r"/([A-Z0-9]{10,})/p/", html_text))
                 
                 new_items_found = 0
@@ -131,7 +140,7 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
                     status_placeholder.warning(f"No new SKUs found on page {current_page}. Stopping.")
                     break
             else:
-                status_placeholder.error(f"Page {current_page} returned HTTP {res.status_code}.")
+                status_placeholder.error(f"Page {current_page} returned HTTP {res.status_code}: {res.text[:200]}")
                 break
 
         except Exception as e:
@@ -154,7 +163,7 @@ def run_proxy_scraper(country_path, cat_slug, query, start_p, end_p):
         time.sleep(1)
 
     return sku_to_page
-    
+
 # --- Excel Generator ---
 def generate_excel_export(sku_to_page_map, country_path):
     wb = openpyxl.Workbook()
