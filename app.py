@@ -1,3 +1,11 @@
+import os
+import subprocess
+
+# Ensure Playwright Chromium binary is installed on startup
+try:
+    subprocess.run(["playwright", "install", "chromium"], check=True)
+except Exception as e:
+    print(f"Playwright installation check failed: {e}")
 import io
 import re
 import time
