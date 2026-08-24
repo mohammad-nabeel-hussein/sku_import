@@ -20,23 +20,19 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS Styling (Removes Collapse Button Without Hiding Sidebar) ---
+# --- CSS Styling (Fixed Sidebar Visibility) ---
 st.markdown("""
 <style>
-    /* Hide the top collapse arrow inside sidebar */
-    button[data-testid="stSidebarCollapseButton"],
-    [data-testid="stSidebarCollapseButton"],
-    button[aria-label="Close sidebar"] {
-        display: none !important;
+    /* Hide the sidebar collapse button icon cleanly */
+    button[kind="header"] { display: none !important; }
+    [data-testid="stSidebarNavCollapseButton"] { display: none !important; }
+    
+    /* Set fixed width without breaking layout flexbox */
+    section[data-testid="stSidebar"] {
+        width: 320px !important;
     }
-
-    /* Lock sidebar width */
-    [data-testid="stSidebar"] {
-        min-width: 320px !important;
-        max-width: 320px !important;
-    }
-
-    /* Hide standard Streamlit header & footer */
+    
+    /* Hide top header bar & footer */
     header[data-testid="stHeader"] { display: none !important; }
     footer { visibility: hidden !important; height: 0px !important; }
     #MainMenu { visibility: hidden !important; }
