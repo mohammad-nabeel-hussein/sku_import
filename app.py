@@ -80,7 +80,7 @@ st.sidebar.divider()
 st.sidebar.subheader("🎯 Accuracy & Debug")
 use_geo_proxy = st.sidebar.checkbox(
     "Match live-site results (Premium Proxy)",
-    value=True,
+    value=False,
     help=(
         "Routes the request through a residential IP located in the selected "
         "store's country, so you get the same catalog a real shopper there "
