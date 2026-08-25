@@ -32,25 +32,34 @@ ALLOWED_EMAILS = {
 }
 
 # --- Secure Authentication Check ---
-# Fetch the automatically passed email from the browser session (OAuth)
-authenticated_user = getattr(st, "experimental_user", None) or getattr(st, "user", None)
-user_email = getattr(authenticated_user, "email", None)
+# Check if the user is already authenticated via Streamlit's auth session
+user = getattr(st, "user", None)
+user_email = getattr(user, "email", None) if user else None
 
-if user_email:
-    user_email = user_email.strip().lower()
+# If not logged in, prompt for Google/OIDC login
+if not user_email:
+    st.error("🔒 Authentication Required")
+    st.info("Please log in with your company account to access this dashboard.")
+    if st.button("🔑 Log in with Google / SSO", type="primary"):
+        st.login()  # Redirects user to authentic OAuth provider
+    st.stop()
 
-# Block access if no session exists or if the logged-in email isn't whitelisted
-if not user_email or user_email not in ALLOWED_EMAILS:
-    st.error("🔒 Access Denied: Unauthorized Account")
-    if user_email:
-        st.warning(f"Logged in as: **{user_email}**. This address is not authorized to use this application.")
-    else:
-        st.info("You must log in through your company SSO / Google identity provider to access this dashboard.")
-    st.stop()  # Completely halts script execution before loading UI or API credentials
+# Case-insensitive comparison
+user_email = user_email.strip().lower()
 
-# Show authenticated user status in the sidebar
+# Check if the authenticated email is in your allowed list
+if user_email not in ALLOWED_EMAILS:
+    st.error("🚫 Access Denied: Unauthorized Account")
+    st.warning(f"Logged in as **{user_email}**, which is not authorized to view this application.")
+    if st.button("Log out"):
+        st.logout()
+    st.stop()
+
+# Successfully authorized
 st.sidebar.success(f"Authenticated as: **{user_email}**")
-
+if st.sidebar.button("Log out"):
+    st.logout()
+    
 # --- ZenRows API Key Integration ---
 DEFAULT_ZENROWS_API_KEY = "a937e177ab01370d56a8fd844836a5cd7ea18486"
 try:
