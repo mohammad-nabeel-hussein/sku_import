@@ -12,7 +12,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import streamlit as st
 
-# --- Page Config (Guarantees Sidebar Expanded) ---
+# --- Page Config ---
 st.set_page_config(
     page_title="Noon SKU Extractor Dashboard",
     page_icon="🛍️",
@@ -31,35 +31,25 @@ ALLOWED_EMAILS = {
     "pragrawal@noon.com",
 }
 
-# --- Secure Authentication Check ---
-# Check if the user is already authenticated via Streamlit's auth session
-user = getattr(st, "user", None)
-user_email = getattr(user, "email", None) if user else None
+# --- Secure Email Detection ---
+# 1. Check if user email is passed automatically via Streamlit Cloud headers
+user_email = getattr(st.user, "email", None) or getattr(getattr(st, "experimental_user", None), "email", None)
 
-# If not logged in, prompt for Google/OIDC login
+# 2. Secure Login Handling
 if not user_email:
-    st.error("🔒 Authentication Required")
-    st.info("Please log in with your company account to access this dashboard.")
-    if st.button("🔑 Log in with Google / SSO", type="primary"):
-        st.login()  # Redirects user to authentic OAuth provider
+    st.error("🔒 Access Denied: Authentication Required")
+    st.info("You must view this app via Streamlit Cloud while logged into your workspace account.")
     st.stop()
 
-# Case-insensitive comparison
 user_email = user_email.strip().lower()
 
-# Check if the authenticated email is in your allowed list
 if user_email not in ALLOWED_EMAILS:
     st.error("🚫 Access Denied: Unauthorized Account")
-    st.warning(f"Logged in as **{user_email}**, which is not authorized to view this application.")
-    if st.button("Log out"):
-        st.logout()
+    st.warning(f"Logged in as **{user_email}**, which is not on the authorized user list.")
     st.stop()
 
-# Successfully authorized
 st.sidebar.success(f"Authenticated as: **{user_email}**")
-if st.sidebar.button("Log out"):
-    st.logout()
-    
+
 # --- ZenRows API Key Integration ---
 DEFAULT_ZENROWS_API_KEY = "a937e177ab01370d56a8fd844836a5cd7ea18486"
 try:
