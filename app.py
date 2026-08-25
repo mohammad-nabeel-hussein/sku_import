@@ -20,7 +20,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Access Control / Email Whitelist ---
+# --- Allowed Email Whitelist ---
 ALLOWED_EMAILS = {
     "mnhussein@noon.com",
     "kmubarak@noon.com",
@@ -31,19 +31,25 @@ ALLOWED_EMAILS = {
     "pragrawal@noon.com",
 }
 
-# Fetch the authenticated user's email (lowercase for case-insensitive check)
-user_email = getattr(st.user, "email", None)
+# --- Secure Authentication Check ---
+# Fetch the automatically passed email from the browser session (OAuth)
+authenticated_user = getattr(st, "experimental_user", None) or getattr(st, "user", None)
+user_email = getattr(authenticated_user, "email", None)
 
-if not user_email:
-    # Fallback input for local testing or when headers aren't passed automatically
-    user_email = st.sidebar.text_input("Enter your email to log in:").strip().lower()
+if user_email:
+    user_email = user_email.strip().lower()
 
-if user_email not in ALLOWED_EMAILS:
-    st.error("🚫 Access Denied: Your email address is not authorized to access this application.")
-    st.info("Please contact the administrator if you believe this is an error.")
-    st.stop()  # Prevents any further code execution for unauthorized users
+# Block access if no session exists or if the logged-in email isn't whitelisted
+if not user_email or user_email not in ALLOWED_EMAILS:
+    st.error("🔒 Access Denied: Unauthorized Account")
+    if user_email:
+        st.warning(f"Logged in as: **{user_email}**. This address is not authorized to use this application.")
+    else:
+        st.info("You must log in through your company SSO / Google identity provider to access this dashboard.")
+    st.stop()  # Completely halts script execution before loading UI or API credentials
 
-st.sidebar.success(f"Logged in as: {user_email}")
+# Show authenticated user status in the sidebar
+st.sidebar.success(f"Authenticated as: **{user_email}**")
 
 # --- ZenRows API Key Integration ---
 DEFAULT_ZENROWS_API_KEY = "a937e177ab01370d56a8fd844836a5cd7ea18486"
